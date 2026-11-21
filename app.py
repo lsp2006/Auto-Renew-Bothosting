@@ -852,12 +852,31 @@ def main():
                         " out.push((b.tagName)+' cls=\"'+String(b.className).slice(0,50)+'\" text=\"'+(b.innerText||'').trim().slice(0,40)+'\" disabled='+b.disabled);"
                         "});"
                         "out.push('弹窗内iframe数: '+d.querySelectorAll('iframe').length);"
-                        "out.push('弹窗内turnstile输入: '+(d.querySelector('input[name=\"cf-turnstile-response\"]')?'有':'无'));"
+                        "document.querySelectorAll('input[name=\"cf-turnstile-response\"]').forEach(function(i,n){"
+                        " out.push('turnstile#'+n+' len='+(i.value||'').length);"
+                        "});"
                         "return out.join('\\n')"
                     )
                     print(f"🗂️ 弹窗内容:\n{dlg_text}")
                 except Exception as e:
                     print(f"⚠️ 读取弹窗失败: {e}")
+                # 挂钩 fetch/XHR, 记录点击后发出的请求与响应状态
+                try:
+                    sb.execute_script(
+                        "if(!window.__hooked){ window.__hooked=true; window.__calls=[];"
+                        " const of=window.fetch;"
+                        " window.fetch=function(u,o){ var rec={u:String(u).substring(0,150), m:(o&&o.method)||'GET', s:null, b:null, req:(o&&typeof o.body==='string')?o.body.substring(0,300):null};"
+                        "  window.__calls.push(rec);"
+                        "  return of.apply(this,arguments).then(function(r){ rec.s=r.status;"
+                        "   try{ r.clone().text().then(function(t){ rec.b=t.substring(0,300); }); }catch(e){}"
+                        "   return r; }); };"
+                        " const ox=XMLHttpRequest.prototype.open, os=XMLHttpRequest.prototype.send;"
+                        " XMLHttpRequest.prototype.open=function(m,u){ this.__rec={m:m,u:String(u).substring(0,150),s:null,b:null,req:null}; window.__calls.push(this.__rec); return ox.apply(this,arguments); };"
+                        " XMLHttpRequest.prototype.send=function(bd){ var r=this; if(typeof bd==='string') r.__rec.req=bd.substring(0,300); this.addEventListener('loadend',function(){ r.__rec.s=r.status; try{ r.__rec.b=r.responseText.substring(0,300); }catch(e){} }); return os.apply(this,arguments); };"
+                        " return 'hooked'; } return 'already';"
+                    )
+                except Exception:
+                    pass
                 for sel in modal_selectors:
                     try:
                         sb.click(sel, timeout=6)
@@ -883,6 +902,17 @@ def main():
                             print(f"⚠️ CDP 点击失败: {e}")
                     else:
                         print("✅ 点击后弹窗已关闭 (可能已提交)")
+                except Exception as e:
+                    print(f"⚠️ 弹窗状态检查失败: {e}")
+                # 输出点击后捕获到的网络请求与响应
+                try:
+                    sb.sleep(5)
+                    calls = sb.execute_script(
+                        "return JSON.stringify((window.__calls||[]).slice(-10));"
+                    )
+                    print(f"🌐 点击后网络请求: {calls}")
+                except Exception as e:
+                    print(f"⚠️ 读取网络日志失败: {e}")
                 except Exception as e:
                     print(f"⚠️ 弹窗状态检查失败: {e}")
                 if modal_button_clicked:
@@ -957,11 +987,11 @@ def main():
                             )
                         )
                     else:
-                        print("⚠️ 续期结果未知，到期日期未变化，请手动检查")
+                        print("⚠️ 续期未生效: 网站已禁止自动环境续期(RENEW_AUTOMATED), 请用自己的浏览器手动续期")
                         send_telegram_message(
                             format_notification(
-                                "⚠️ 续期可能未成功",
-                                extra="请登录后台检查",
+                                "⏰ 请手动续期",
+                                extra=f"🚫 网站已禁止自动续期(RENEW_AUTOMATED), 请用自己的浏览器打开 bot-hosting.net 手动点续期; 到期时间: {new_expiry or current_expiry or '未知'}",
                                 expiry_date=current_expiry or "（未获取到）"
                             )
                         )
